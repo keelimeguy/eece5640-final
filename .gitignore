@@ -1,0 +1,4 @@
+gpgpu-sim_distribution/
+cuda_install/
+output/
+.dummy
