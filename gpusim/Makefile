@@ -31,7 +31,7 @@ check-gcc:
 
 gpusim: .dummy
 
-.dummy: check-gcc gpgpu-sim_distribution/.dummy gpu-cache.cc
+.dummy: check-gcc gpgpu-sim_distribution/.dummy gpu-cache.cc gpu-cache.h
 ifndef CUDA_INSTALL_PATH
 	$(error CUDA_INSTALL_PATH is not set, try `sudo make cuda` then set environment variables appropriately.)
 endif
@@ -40,6 +40,7 @@ endif
 	 && echo 'Missing dependency: try `apt-cache search makedepend`' && exit 1 || echo ''
 
 	@cp gpu-cache.cc gpgpu-sim_distribution/src/gpgpu-sim/gpu-cache.cc
+	@cp gpu-cache.h gpgpu-sim_distribution/src/gpgpu-sim/gpu-cache.h
 	@cd gpgpu-sim_distribution \
 	 && source setup_environment \
 	 && make

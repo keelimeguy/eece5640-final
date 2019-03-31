@@ -1,7 +1,5 @@
 #/bin/bash
 
-exit 1
-
 CUR_DIR=`pwd`
 
 GPGPUSIM_DIR=${CUR_DIR}/gpusim/gpgpu-sim_distribution
@@ -21,13 +19,12 @@ for dir in ${GPGPUSIM_DIR} ${CONFIG_DIR} ${BENCHMARK_BIN_DIR}; do
 done
 
 cd ${GPGPUSIM_DIR}/..
-# make clean-gpusim
 make gpusim || exit 1
 
 source ${GPGPUSIM_DIR}/setup_environment
 
-# Testing 3 indexing techniques: (L=linear, H=hash set, C=custom)
-for set_index_fn in H C L; do
+# Testing 4 indexing techniques: (L=linear, S=simple XOR, P=psuedo random interleaving, F=fermi hash set)
+for set_index_fn in F P S L; do
 
     # Four cache configurations per technique: (fifo32, fifo64, lru32, lru64)
     assoc=4
@@ -61,7 +58,7 @@ for set_index_fn in H C L; do
                         cd ${BENCHMARK_DIR}/$BMK
 
                         # Run benchmark
-                        sh README.GPGPU-Sim 2>&1| tee ${OUTPUT_DIR}/out_${BMK}_${replace_policy}${nsets}.txt \
+                        sh README.GPGPU-Sim 2>&1| tee ${OUTPUT_DIR}/out_${BMK}_${replace_policy}${nsets}_${set_index_fn}.txt \
                           || exit 1
 
                     fi

@@ -32,19 +32,19 @@
 #define MAX_DEFAULT_CACHE_SIZE_MULTIBLIER 4
 // used to allocate memory that is large enough to adapt the changes in cache size across kernels
 
-const char * cache_request_status_str(enum cache_request_status status) 
+const char * cache_request_status_str(enum cache_request_status status)
 {
    static const char * static_cache_request_status_str[] = {
       "HIT",
       "HIT_RESERVED",
       "MISS",
       "RESERVATION_FAIL"
-   }; 
+   };
 
-   assert(sizeof(static_cache_request_status_str) / sizeof(const char*) == NUM_CACHE_REQUEST_STATUS); 
-   assert(status < NUM_CACHE_REQUEST_STATUS); 
+   assert(sizeof(static_cache_request_status_str) / sizeof(const char*) == NUM_CACHE_REQUEST_STATUS);
+   assert(status < NUM_CACHE_REQUEST_STATUS);
 
-   return static_cache_request_status_str[status]; 
+   return static_cache_request_status_str[status];
 }
 
 unsigned l1d_cache_config::set_index(new_addr_type addr) const{
@@ -80,8 +80,63 @@ unsigned l1d_cache_config::set_index(new_addr_type addr) const{
         }
         break;
 
-    case CUSTOM_SET_FUNCTION:
-        /* No custom set function implemented */
+    case SIMPLE_XOR_SET_FUNCTION:
+        if(m_nset == 32) {
+            // Lower xor value is bits 7-11
+            lower_xor = (addr >> m_line_sz_log2) & 0x1F;
+
+            // Upper xor value is bits 12-16
+            upper_xor = ((addr >> m_line_sz_log2) >> 5) & 0x1F;
+
+            set_index = (lower_xor ^ upper_xor);
+
+        } else if(m_nset == 64) {
+            // Lower xor value is bits 7-12
+            lower_xor = (addr >> m_line_sz_log2) & 0x3F;
+
+            // Upper xor value is bits 13-18
+            upper_xor = ((addr >> m_line_sz_log2) >> 6) & 0x3F;
+
+            set_index = (lower_xor ^ upper_xor);
+
+        } else {
+            assert("\nGPGPU-Sim cache configuration error: The number of sets should be "
+                    "32 or 64 for the hashing set index function.\n" && 0);
+        }
+        break;
+
+    case PSUEDO_RANDOM_INTERLEAVED_SET_FUNCTION:
+        // B(x) = (A(x) / x^m)*x^m + (A(x) mod P(x))
+        // H-matrix w/ ith row (from bottom):
+        //   d^i mod P(x), where d is primitive element (x+1)?
+        // for n-bits a mapping to m-bits b:
+        //   H[i,j] = 1 iff a{n-i-1} is an input to XOR gate outputing b{j}
+        //   (counting [i,j] from bottom right)
+
+        #define A(bit) (( (addr >> m_line_sz_log2) >> bit) & 1)
+        #define B(bit,a) ( (a) << bit)
+
+        // Using POLY(37) = x^5 + x^2 + 1 (1 of 6 irreducible polynomials of degree 5 over GF(2))
+        if(m_nset == 32) {
+            set_index  = B(0, A(18) ^ A(17) ^ A(16) ^ A(15) ^ A(14) ^ A(11) ^ A(10) ^ A(8) ^ A(5) ^ A(0) );
+            set_index |= B(1, A(19) ^ A(18) ^ A(17) ^ A(16) ^ A(15) ^ A(12) ^ A(11) ^ A(9) ^ A(6) ^ A(1) );
+            set_index |= B(2, A(19) ^ A(15) ^ A(14) ^ A(13) ^ A(12) ^ A(11) ^ A(8)  ^ A(7) ^ A(5) ^ A(2) );
+            set_index |= B(3,         A(16) ^ A(15) ^ A(14) ^ A(13) ^ A(12) ^ A(9)  ^ A(8) ^ A(6) ^ A(3) );
+            set_index |= B(4,         A(17) ^ A(16) ^ A(15) ^ A(14) ^ A(13) ^ A(10) ^ A(9) ^ A(7) ^ A(4) );
+
+        // Using POLY(67) = x^6 + x + 1 (1 of 9 irreducible polynomials of degree 6 over GF(2))
+        } else if(m_nset == 64) {
+            set_index  = B(0,         A(23) ^ A(22) ^ A(21) ^ A(18) ^ A(16) ^ A(12) ^ A(11) ^ A(6)  ^ A(0) );
+            set_index |= B(1, A(21) ^ A(19) ^ A(18) ^ A(17) ^ A(16) ^ A(13) ^ A(11) ^ A(7)  ^ A(6)  ^ A(1) );
+            set_index |= B(2, A(22) ^ A(20) ^ A(19) ^ A(18) ^ A(17) ^ A(14) ^ A(12) ^ A(8)  ^ A(7)  ^ A(2) );
+            set_index |= B(3, A(23) ^ A(21) ^ A(20) ^ A(19) ^ A(18) ^ A(15) ^ A(13) ^ A(9)  ^ A(8)  ^ A(3) );
+            set_index |= B(4,         A(22) ^ A(21) ^ A(20) ^ A(19) ^ A(16) ^ A(14) ^ A(10) ^ A(9)  ^ A(4) );
+            set_index |= B(5,         A(23) ^ A(22) ^ A(21) ^ A(20) ^ A(17) ^ A(15) ^ A(11) ^ A(10) ^ A(5) );
+
+        } else {
+            assert("\nGPGPU-Sim cache configuration error: The number of sets should be "
+                    "32 or 64 for the hashing set index function.\n" && 0);
+        }
         break;
 
     case LINEAR_SET_FUNCTION:
@@ -111,7 +166,7 @@ unsigned l2_cache_config::set_index(new_addr_type addr) const{
 	}
 }
 
-tag_array::~tag_array() 
+tag_array::~tag_array()
 {
     delete[] m_lines;
 }
@@ -151,7 +206,7 @@ void tag_array::init( int core_id, int type_id )
     m_prev_snapshot_access = 0;
     m_prev_snapshot_miss = 0;
     m_prev_snapshot_pending_hit = 0;
-    m_core_id = core_id; 
+    m_core_id = core_id;
     m_type_id = type_id;
 }
 
@@ -205,7 +260,7 @@ enum cache_request_status tag_array::probe( new_addr_type addr, unsigned &idx ) 
         }
     }
     if ( all_reserved ) {
-        assert( m_config.m_alloc_policy == ON_MISS ); 
+        assert( m_config.m_alloc_policy == ON_MISS );
         return RESERVATION_FAIL; // miss and not enough space in cache to allocate on miss
     }
 
@@ -213,7 +268,7 @@ enum cache_request_status tag_array::probe( new_addr_type addr, unsigned &idx ) 
         idx = invalid_line;
     } else if ( valid_line != (unsigned)-1) {
         idx = valid_line;
-    } else abort(); // if an unreserved block exists, it is either invalid or replaceable 
+    } else abort(); // if an unreserved block exists, it is either invalid or replaceable
 
     return MISS;
 }
@@ -227,16 +282,16 @@ enum cache_request_status tag_array::access( new_addr_type addr, unsigned time, 
     return result;
 }
 
-enum cache_request_status tag_array::access( new_addr_type addr, unsigned time, unsigned &idx, bool &wb, cache_block_t &evicted ) 
+enum cache_request_status tag_array::access( new_addr_type addr, unsigned time, unsigned &idx, bool &wb, cache_block_t &evicted )
 {
     m_access++;
     shader_cache_access_log(m_core_id, m_type_id, 0); // log accesses to cache
     enum cache_request_status status = probe(addr,idx);
     switch (status) {
-    case HIT_RESERVED: 
+    case HIT_RESERVED:
         m_pending_hit++;
-    case HIT: 
-        m_lines[idx].m_last_access_time=time; 
+    case HIT:
+        m_lines[idx].m_last_access_time=time;
         break;
     case MISS:
         m_miss++;
@@ -271,13 +326,13 @@ void tag_array::fill( new_addr_type addr, unsigned time )
     m_lines[idx].fill(time);
 }
 
-void tag_array::fill( unsigned index, unsigned time ) 
+void tag_array::fill( unsigned index, unsigned time )
 {
     assert( m_config.m_alloc_policy == ON_MISS );
     m_lines[index].fill(time);
 }
 
-void tag_array::flush() 
+void tag_array::flush()
 {
     for (unsigned i=0; i < m_config.get_num_lines(); i++)
         m_lines[i].m_status = INVALID;
@@ -305,8 +360,8 @@ void tag_array::new_window()
 void tag_array::print( FILE *stream, unsigned &total_access, unsigned &total_misses ) const
 {
     m_config.print(stream);
-    fprintf( stream, "\t\tAccess = %d, Miss = %d (%.3g), PendingHit = %d (%.3g)\n", 
-             m_access, m_miss, (float) m_miss / m_access, 
+    fprintf( stream, "\t\tAccess = %d, Miss = %d (%.3g), PendingHit = %d (%.3g)\n",
+             m_access, m_miss, (float) m_miss / m_access,
              m_pending_hit, (float) m_pending_hit / m_access);
     total_misses+=m_miss;
     total_access+=m_access;
@@ -324,7 +379,7 @@ void tag_array::get_stats(unsigned &total_access, unsigned &total_misses, unsign
 bool was_write_sent( const std::list<cache_event> &events )
 {
     for( std::list<cache_event>::const_iterator e=events.begin(); e!=events.end(); e++ ) {
-        if( *e == WRITE_REQUEST_SENT ) 
+        if( *e == WRITE_REQUEST_SENT )
             return true;
     }
     return false;
@@ -333,7 +388,7 @@ bool was_write_sent( const std::list<cache_event> &events )
 bool was_writeback_sent( const std::list<cache_event> &events )
 {
     for( std::list<cache_event>::const_iterator e=events.begin(); e!=events.end(); e++ ) {
-        if( *e == WRITE_BACK_REQUEST_SENT ) 
+        if( *e == WRITE_BACK_REQUEST_SENT )
             return true;
     }
     return false;
@@ -342,7 +397,7 @@ bool was_writeback_sent( const std::list<cache_event> &events )
 bool was_read_sent( const std::list<cache_event> &events )
 {
     for( std::list<cache_event>::const_iterator e=events.begin(); e!=events.end(); e++ ) {
-        if( *e == READ_REQUEST_SENT ) 
+        if( *e == READ_REQUEST_SENT )
             return true;
     }
     return false;
@@ -420,9 +475,9 @@ cache_stats::cache_stats(){
     for(unsigned i=0; i<NUM_MEM_ACCESS_TYPE; ++i){
         m_stats[i].resize(NUM_CACHE_REQUEST_STATUS, 0);
     }
-    m_cache_port_available_cycles = 0; 
-    m_cache_data_port_busy_cycles = 0; 
-    m_cache_fill_port_busy_cycles = 0; 
+    m_cache_port_available_cycles = 0;
+    m_cache_data_port_busy_cycles = 0;
+    m_cache_fill_port_busy_cycles = 0;
 }
 
 void cache_stats::clear(){
@@ -432,9 +487,9 @@ void cache_stats::clear(){
     for(unsigned i=0; i<NUM_MEM_ACCESS_TYPE; ++i){
         std::fill(m_stats[i].begin(), m_stats[i].end(), 0);
     }
-    m_cache_port_available_cycles = 0; 
-    m_cache_data_port_busy_cycles = 0; 
-    m_cache_fill_port_busy_cycles = 0; 
+    m_cache_port_available_cycles = 0;
+    m_cache_data_port_busy_cycles = 0;
+    m_cache_fill_port_busy_cycles = 0;
 }
 
 void cache_stats::inc_stats(int access_type, int access_outcome){
@@ -489,9 +544,9 @@ cache_stats cache_stats::operator+(const cache_stats &cs){
             ret(type, status) = m_stats[type][status] + cs(type, status);
         }
     }
-    ret.m_cache_port_available_cycles = m_cache_port_available_cycles + cs.m_cache_port_available_cycles; 
-    ret.m_cache_data_port_busy_cycles = m_cache_data_port_busy_cycles + cs.m_cache_data_port_busy_cycles; 
-    ret.m_cache_fill_port_busy_cycles = m_cache_fill_port_busy_cycles + cs.m_cache_fill_port_busy_cycles; 
+    ret.m_cache_port_available_cycles = m_cache_port_available_cycles + cs.m_cache_port_available_cycles;
+    ret.m_cache_data_port_busy_cycles = m_cache_data_port_busy_cycles + cs.m_cache_data_port_busy_cycles;
+    ret.m_cache_fill_port_busy_cycles = m_cache_fill_port_busy_cycles + cs.m_cache_fill_port_busy_cycles;
     return ret;
 }
 
@@ -504,9 +559,9 @@ cache_stats &cache_stats::operator+=(const cache_stats &cs){
             m_stats[type][status] += cs(type, status);
         }
     }
-    m_cache_port_available_cycles += cs.m_cache_port_available_cycles; 
-    m_cache_data_port_busy_cycles += cs.m_cache_data_port_busy_cycles; 
-    m_cache_fill_port_busy_cycles += cs.m_cache_fill_port_busy_cycles; 
+    m_cache_port_available_cycles += cs.m_cache_port_available_cycles;
+    m_cache_data_port_busy_cycles += cs.m_cache_data_port_busy_cycles;
+    m_cache_fill_port_busy_cycles += cs.m_cache_fill_port_busy_cycles;
     return *this;
 }
 
@@ -533,16 +588,16 @@ void cache_stats::print_stats(FILE *fout, const char *cache_name) const{
 
 void cache_sub_stats::print_port_stats(FILE *fout, const char *cache_name) const
 {
-    float data_port_util = 0.0f; 
+    float data_port_util = 0.0f;
     if (port_available_cycles > 0) {
-        data_port_util = (float) data_port_busy_cycles / port_available_cycles; 
+        data_port_util = (float) data_port_busy_cycles / port_available_cycles;
     }
-    fprintf(fout, "%s_data_port_util = %.3f\n", cache_name, data_port_util); 
-    float fill_port_util = 0.0f; 
+    fprintf(fout, "%s_data_port_util = %.3f\n", cache_name, data_port_util);
+    float fill_port_util = 0.0f;
     if (port_available_cycles > 0) {
-        fill_port_util = (float) fill_port_busy_cycles / port_available_cycles; 
+        fill_port_util = (float) fill_port_busy_cycles / port_available_cycles;
     }
-    fprintf(fout, "%s_fill_port_util = %.3f\n", cache_name, fill_port_util); 
+    fprintf(fout, "%s_fill_port_util = %.3f\n", cache_name, fill_port_util);
 }
 
 unsigned cache_stats::get_stats(enum mem_access_type *access_type, unsigned num_access_type, enum cache_request_status *access_status, unsigned num_access_status) const{
@@ -584,9 +639,9 @@ void cache_stats::get_sub_stats(struct cache_sub_stats &css) const{
         }
     }
 
-    t_css.port_available_cycles = m_cache_port_available_cycles; 
-    t_css.data_port_busy_cycles = m_cache_data_port_busy_cycles; 
-    t_css.fill_port_busy_cycles = m_cache_fill_port_busy_cycles; 
+    t_css.port_available_cycles = m_cache_port_available_cycles;
+    t_css.data_port_busy_cycles = m_cache_data_port_busy_cycles;
+    t_css.fill_port_busy_cycles = m_cache_fill_port_busy_cycles;
 
     css = t_css;
 }
@@ -601,83 +656,83 @@ bool cache_stats::check_valid(int type, int status) const{
         return false;
 }
 
-void cache_stats::sample_cache_port_utility(bool data_port_busy, bool fill_port_busy) 
+void cache_stats::sample_cache_port_utility(bool data_port_busy, bool fill_port_busy)
 {
-    m_cache_port_available_cycles += 1; 
+    m_cache_port_available_cycles += 1;
     if (data_port_busy) {
-        m_cache_data_port_busy_cycles += 1; 
-    } 
+        m_cache_data_port_busy_cycles += 1;
+    }
     if (fill_port_busy) {
-        m_cache_fill_port_busy_cycles += 1; 
-    } 
+        m_cache_fill_port_busy_cycles += 1;
+    }
 }
 
-baseline_cache::bandwidth_management::bandwidth_management(cache_config &config) 
+baseline_cache::bandwidth_management::bandwidth_management(cache_config &config)
 : m_config(config)
 {
-    m_data_port_occupied_cycles = 0; 
-    m_fill_port_occupied_cycles = 0; 
+    m_data_port_occupied_cycles = 0;
+    m_fill_port_occupied_cycles = 0;
 }
 
-/// use the data port based on the outcome and events generated by the mem_fetch request 
+/// use the data port based on the outcome and events generated by the mem_fetch request
 void baseline_cache::bandwidth_management::use_data_port(mem_fetch *mf, enum cache_request_status outcome, const std::list<cache_event> &events)
 {
-    unsigned data_size = mf->get_data_size(); 
-    unsigned port_width = m_config.m_data_port_width; 
+    unsigned data_size = mf->get_data_size();
+    unsigned port_width = m_config.m_data_port_width;
     switch (outcome) {
     case HIT: {
-        unsigned data_cycles = data_size / port_width + ((data_size % port_width > 0)? 1 : 0); 
-        m_data_port_occupied_cycles += data_cycles; 
-        } break; 
-    case HIT_RESERVED: 
+        unsigned data_cycles = data_size / port_width + ((data_size % port_width > 0)? 1 : 0);
+        m_data_port_occupied_cycles += data_cycles;
+        } break;
+    case HIT_RESERVED:
     case MISS: {
-        // the data array is accessed to read out the entire line for write-back 
+        // the data array is accessed to read out the entire line for write-back
         if (was_writeback_sent(events)) {
-            unsigned data_cycles = m_config.m_line_sz / port_width; 
-            m_data_port_occupied_cycles += data_cycles; 
+            unsigned data_cycles = m_config.m_line_sz / port_width;
+            m_data_port_occupied_cycles += data_cycles;
         }
-        } break; 
-    case RESERVATION_FAIL: 
-        // Does not consume any port bandwidth 
-        break; 
-    default: 
-        assert(0); 
-        break; 
-    } 
+        } break;
+    case RESERVATION_FAIL:
+        // Does not consume any port bandwidth
+        break;
+    default:
+        assert(0);
+        break;
+    }
 }
 
-/// use the fill port 
+/// use the fill port
 void baseline_cache::bandwidth_management::use_fill_port(mem_fetch *mf)
 {
-    // assume filling the entire line with the returned request 
-    unsigned fill_cycles = m_config.m_line_sz / m_config.m_data_port_width; 
-    m_fill_port_occupied_cycles += fill_cycles; 
+    // assume filling the entire line with the returned request
+    unsigned fill_cycles = m_config.m_line_sz / m_config.m_data_port_width;
+    m_fill_port_occupied_cycles += fill_cycles;
 }
 
-/// called every cache cycle to free up the ports 
+/// called every cache cycle to free up the ports
 void baseline_cache::bandwidth_management::replenish_port_bandwidth()
 {
     if (m_data_port_occupied_cycles > 0) {
-        m_data_port_occupied_cycles -= 1; 
+        m_data_port_occupied_cycles -= 1;
     }
-    assert(m_data_port_occupied_cycles >= 0); 
+    assert(m_data_port_occupied_cycles >= 0);
 
     if (m_fill_port_occupied_cycles > 0) {
-        m_fill_port_occupied_cycles -= 1; 
+        m_fill_port_occupied_cycles -= 1;
     }
-    assert(m_fill_port_occupied_cycles >= 0); 
+    assert(m_fill_port_occupied_cycles >= 0);
 }
 
-/// query for data port availability 
+/// query for data port availability
 bool baseline_cache::bandwidth_management::data_port_free() const
 {
-    return (m_data_port_occupied_cycles == 0); 
+    return (m_data_port_occupied_cycles == 0);
 }
 
-/// query for fill port availability 
+/// query for fill port availability
 bool baseline_cache::bandwidth_management::fill_port_free() const
 {
-    return (m_fill_port_occupied_cycles == 0); 
+    return (m_fill_port_occupied_cycles == 0);
 }
 
 /// Sends next request to lower level of memory
@@ -689,10 +744,10 @@ void baseline_cache::cycle(){
             m_memport->push(mf);
         }
     }
-    bool data_port_busy = !m_bandwidth_management.data_port_free(); 
-    bool fill_port_busy = !m_bandwidth_management.fill_port_free(); 
-    m_stats.sample_cache_port_utility(data_port_busy, fill_port_busy); 
-    m_bandwidth_management.replenish_port_bandwidth(); 
+    bool data_port_busy = !m_bandwidth_management.data_port_free();
+    bool fill_port_busy = !m_bandwidth_management.fill_port_free();
+    m_stats.sample_cache_port_utility(data_port_busy, fill_port_busy);
+    m_bandwidth_management.replenish_port_bandwidth();
 }
 
 /// Interface for response from lower memory level (model bandwidth restictions in caller)
@@ -714,7 +769,7 @@ void baseline_cache::fill(mem_fetch *mf, unsigned time){
         block.m_status = MODIFIED; // mark line as dirty for atomic operation
     }
     m_extra_mf_fields.erase(mf);
-    m_bandwidth_management.use_fill_port(mf); 
+    m_bandwidth_management.use_fill_port(mf);
 }
 
 /// Checks if mf is waiting to be filled by lower memory level
@@ -851,9 +906,9 @@ data_cache::wr_miss_wa( new_addr_type addr,
     // Conservatively ensure the worst-case request can be handled this cycle
     bool mshr_hit = m_mshrs.probe(block_addr);
     bool mshr_avail = !m_mshrs.full(block_addr);
-    if(miss_queue_full(2) 
-        || (!(mshr_hit && mshr_avail) 
-        && !(!mshr_hit && mshr_avail 
+    if(miss_queue_full(2)
+        || (!(mshr_hit && mshr_avail)
+        && !(!mshr_hit && mshr_avail
         && (m_miss_queue.size() < m_config.m_miss_queue_size))))
         return RESERVATION_FAIL;
 
@@ -888,7 +943,7 @@ data_cache::wr_miss_wa( new_addr_type addr,
     if( do_miss ){
         // If evicted block is modified and not a write-through
         // (already modified lower level)
-        if( wb && (m_config.m_write_policy != WRITE_THROUGH) ) { 
+        if( wb && (m_config.m_write_policy != WRITE_THROUGH) ) {
             mem_fetch *wb = m_memfetch_creator->alloc(evicted.m_block_addr,
                 m_wrbk_type,m_config.get_line_sz(),true);
             m_miss_queue.push_back(wb);
@@ -934,7 +989,7 @@ data_cache::rd_hit_base( new_addr_type addr,
     m_tag_array->access(block_addr,time,cache_index);
     // Atomics treated as global read/write requests - Perform read, mark line as
     // MODIFIED
-    if(mf->isatomic()){ 
+    if(mf->isatomic()){
         assert(mf->get_access_type() == GLOBAL_ACC_R);
         cache_block_t &block = m_tag_array->get_block(cache_index);
         block.m_status = MODIFIED;  // mark line as dirty
@@ -956,7 +1011,7 @@ data_cache::rd_miss_base( new_addr_type addr,
     if(miss_queue_full(1))
         // cannot handle request this cycle
         // (might need to generate two requests)
-        return RESERVATION_FAIL; 
+        return RESERVATION_FAIL;
 
     new_addr_type block_addr = m_config.block_addr(addr);
     bool do_miss = false;
@@ -970,7 +1025,7 @@ data_cache::rd_miss_base( new_addr_type addr,
     if( do_miss ){
         // If evicted block is modified and not a write-through
         // (already modified lower level)
-        if(wb && (m_config.m_write_policy != WRITE_THROUGH) ){ 
+        if(wb && (m_config.m_write_policy != WRITE_THROUGH) ){
             mem_fetch *wb = m_memfetch_creator->alloc(evicted.m_block_addr,
                 m_wrbk_type,m_config.get_line_sz(),true);
         send_write_request(wb, WRITE_BACK_REQUEST_SENT, time, events);
@@ -1054,7 +1109,7 @@ data_cache::process_tag_probe( bool wr,
         }
     }
 
-    m_bandwidth_management.use_data_port(mf, access_status, events); 
+    m_bandwidth_management.use_data_port(mf, access_status, events);
     return access_status;
 }
 
