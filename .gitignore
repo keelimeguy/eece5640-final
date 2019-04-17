@@ -1,4 +1,7 @@
+ispass2009-benchmarks/
 gpgpu-sim_distribution/
 cuda_install/
 output/
+common
 .dummy
+*.swp

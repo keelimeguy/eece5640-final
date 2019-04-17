@@ -1,0 +1,9 @@
+bin/
+common
+*.log
+*.xml
+obj/
+*.txt
+*.icnt
+*.config
+_cuobjdump*
