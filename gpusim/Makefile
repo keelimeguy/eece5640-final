@@ -8,7 +8,7 @@
 SHELL := /bin/bash # Use bash syntax
 CUR_DIR = $(shell pwd)
 
-all: gpusim
+all: benchmarks gpusim
 
 ##############################
 # Make rules for gcc version #
@@ -29,12 +29,15 @@ check-gcc:
 # Make rules for gpusim tool #
 ##############################
 
-gpusim: .dummy
+gpusim: .dummy check-gcc
 
-.dummy: check-gcc gpgpu-sim_distribution/.dummy gpu-cache.cc gpu-cache.h
+.dummy: gpgpu-sim_distribution/.dummy gpu-cache.cc gpu-cache.h
 ifndef CUDA_INSTALL_PATH
 	$(error CUDA_INSTALL_PATH is not set, try `sudo make cuda` then set environment variables appropriately.)
 endif
+	@if [ ! -d ${CUDA_INSTALL_PATH} ]; then \
+		echo "${CUDA_INSTALL_PATH} is not found, did you set your environment variables correctly?" | exit 1; \
+	fi
 
 	@which makedepend 2>&1| grep -q 'no makedepend in' \
 	 && echo 'Missing dependency: try `apt-cache search makedepend`' && exit 1 || echo ''
@@ -54,19 +57,25 @@ clean-gpusim:
 # Make rules for benchmarks #
 #############################
 
-CUDA_SDK_DIR=~/NVIDIA_GPU_Computing_SDK
-
 benchmarks: check-gcc ispass2009-benchmarks/.dummy
-	@if [ ! -e ${CUDA_SDK_DIR} ]; then \
-		echo "${CUDA_SDK_DIR} is not found)" | exit 1; \
+ifndef NVIDIA_COMPUTE_SDK_LOCATION
+	$(error NVIDIA_COMPUTE_SDK_LOCATION is not set, try `sudo make cuda` then set environment variables appropriately.)
+endif
+	@if [ ! -d ${NVIDIA_COMPUTE_SDK_LOCATION} ]; then \
+		echo "${NVIDIA_COMPUTE_SDK_LOCATION} is not found, did you set your environment variables correctly?" | exit 1; \
 	fi
 
-	-@cd ${CUDA_SDK_DIR}/C \
-	 && make
+	@mkdir -p ${NVIDIA_COMPUTE_SDK_LOCATION}/C/common/obj 2>/dev/null \
+	 || (echo "No write access. Try \`sudo chown -R ${USER} ${NVIDIA_COMPUTE_SDK_LOCATION}\`" && exit 1)
 
+	@cd ${NVIDIA_COMPUTE_SDK_LOCATION}/C \
+	 && make 2>&1 | tee /dev/tty | grep -q "Error" \
+	 && (make 2>&1 | grep -q "\-lcuda" || exit 1)
+
+	cp /usr/include/mpi/mpi.h ispass2009-benchmarks/DG/include/
+	cp /usr/include/mpi/mpi_portable_platform.h ispass2009-benchmarks/DG/include/
 	@cd ispass2009-benchmarks \
 	 && make -f Makefile.ispass-2009
-
 
 clean-benchmarks:
 	@cd ispass2009-benchmarks \
@@ -83,12 +92,12 @@ ispass2009-benchmarks/.dummy:
 		git clone https://github.com/gpgpu-sim/ispass2009-benchmarks.git; \
 		cd ispass2009-benchmarks \
 		 && git checkout 1716296b22bc78acdef08fb46a338f36f9dd4b96; \
-		sed -i "s/.*boost_filesystem.*/LINKFLAGS      := -L\$(BOOST_LIB) -lboost_filesystem\$(BOOST_VER) -lboost_system\$(BOOST_VER)/g" ${CUR_DIR}/ispass2009-benchmarks/AES/Makefile; \
+		sed -i "s/.*boost_filesystem.*/LINKFLAGS      := -L\$$(BOOST_LIB) -lboost_filesystem\$$(BOOST_VER) -lboost_system\$$(BOOST_VER)/g" ${CUR_DIR}/ispass2009-benchmarks/AES/Makefile; \
 		sed -i "s/CUT_EXIT.*/\/\/&/g" ${CUR_DIR}/ispass2009-benchmarks/LIB/libor.cu; \
 		sed -i "s/CUT_EXIT.*/\/\/&/g" ${CUR_DIR}/ispass2009-benchmarks/LPS/laplace3d.cu; \
 		sed -i "s|../../../bin/release/|../bin/release/|g" ${CUR_DIR}/ispass2009-benchmarks/STO/README.GPGPU-Sim; \
 		sed -i "s|../../../bin/release/|../bin/release/|g" ${CUR_DIR}/ispass2009-benchmarks/WP/README.GPGPU-Sim; \
-		sed -i "s/\$(CFLAGS) -/-fPIC \$(CFLAGS) -/g" ${CUR_DIR}/ispass2009-benchmarks/WP/makefile; \
+		sed -i "s/\$$(CFLAGS) -/-fPIC \$$(CFLAGS) -/g" ${CUR_DIR}/ispass2009-benchmarks/WP/makefile; \
 	fi
 
 	touch ispass2009-benchmarks/.dummy
@@ -120,6 +129,7 @@ cuda_install/.dummy:
 	@ls /root 2>/dev/null || (echo 'Try running `sudo make cuda` instead.' && exit 1)
 
 	@echo "Installing cudatoolkit_4.0.17"
+	@echo "(Place into /usr/local/cuda, and be sure to set system environment variables afterwards."
 	@if [ ! -f "cuda_install/cudatoolkit_4.0.17_linux_64_ubuntu10.10.run" ]; then \
 		cd cuda_install \
 		 && wget http://developer.download.nvidia.com/compute/cuda/4_0/toolkit/cudatoolkit_4.0.17_linux_64_ubuntu10.10.run \
@@ -139,6 +149,7 @@ cuda_install/.dummy:
 	# 	&& ./devdriver_4.0_linux_64_270.41.19.run --ui=none --no-runlevel-check || echo '';\
 
 	@echo "Installing gpucomputingsdk_4.0.17"
+	@echo "(Place into ~/NVIDIA_GPU_Computing_SDK for your non-sudo account, e.g. /home/keelin/NVIDIA_GPU_Computing_SDK)"
 	@if [ ! -f "cuda_install/gpucomputingsdk_4.0.17_linux.run" ]; then \
 		cd cuda_install \
 		 && wget http://developer.download.nvidia.com/compute/cuda/4_0/sdk/gpucomputingsdk_4.0.17_linux.run \

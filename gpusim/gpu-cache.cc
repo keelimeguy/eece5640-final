@@ -108,7 +108,7 @@ unsigned l1d_cache_config::set_index(new_addr_type addr) const{
     case PSUEDO_RANDOM_INTERLEAVED_SET_FUNCTION:
         // B(x) = (A(x) / x^m)*x^m + (A(x) mod P(x))
         // H-matrix w/ ith row (from bottom):
-        //   d^i mod P(x), where d is primitive element (x+1)?
+        //   d^i mod P(x), where d is primitive element (x)
         // for n-bits a mapping to m-bits b:
         //   H[i,j] = 1 iff a{n-i-1} is an input to XOR gate outputing b{j}
         //   (counting [i,j] from bottom right)

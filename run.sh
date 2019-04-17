@@ -4,6 +4,7 @@ CUR_DIR=`pwd`
 
 GPGPUSIM_DIR=${CUR_DIR}/gpusim/gpgpu-sim_distribution
 BENCHMARK_DIR=${CUR_DIR}/gpusim/ispass2009-benchmarks
+CUSTOM_BENCHMARK_DIR=${CUR_DIR}/CustomBenchmarks
 OUTPUT_DIR=${CUR_DIR}/output
 CONFIG_DIR=${CUR_DIR}/configurations
 
@@ -11,12 +12,19 @@ CONFIG_FILE=${CONFIG_DIR}/gpgpusim.config
 CONFIG_INTERCONNECT=${CONFIG_DIR}/config_fermi_islip.icnt
 CONFIG_ENERGY_MODEL=${CONFIG_DIR}/gpuwattch_gtx480.xml
 
-for dir in ${GPGPUSIM_DIR} ${CONFIG_DIR} ${BENCHMARK_BIN_DIR}; do
+mkdir -p ${OUTPUT_DIR}
+
+for dir in ${GPGPUSIM_DIR} ${OUTPUT_DIR} ${CONFIG_DIR}; do
     if [ ! -d "${dir}" ]; then
         echo ${dir}' not found'
         exit 1
     fi
 done
+
+if [ ! -d "${BENCHMARK_DIR}" ]; then
+    cd gpusim/
+    make benchmarks || exit 1
+fi
 
 cd ${GPGPUSIM_DIR}/..
 make gpusim || exit 1
@@ -41,6 +49,34 @@ for set_index_fn in F P S L; do
             sed -i "s/-gpgpu_cache:dl1 .*/-gpgpu_cache:dl1 ${nsets}:128:${assoc},${replace_policy}:L:m:N:${set_index_fn},A:32:8,8/g" ${CONFIG_FILE}
             sed -i "s/-gpgpu_shmem_size .*/-gpgpu_shmem_size ${shmem_size}/g" ${CONFIG_FILE}
 
+            #################################
+            # Perform Custom Benchmarks
+            #################################
+
+            cd ${CUSTOM_BENCHMARK_DIR}
+            BENCHMARKS=`ls -1 -F | awk '/\//' | sed 's/\///'`;
+
+            make || exit 1
+
+            for BMK in ${BENCHMARKS}; do
+                if [ -f ${CUSTOM_BENCHMARK_DIR}/${BMK}/README.GPGPU-Sim ]; then
+                    # Link configuration files
+                    ln -v -s -f ${CONFIG_FILE} ${CUSTOM_BENCHMARK_DIR}/${BMK}
+                    ln -v -s -f ${CONFIG_INTERCONNECT} ${CUSTOM_BENCHMARK_DIR}/${BMK}
+                    ln -v -s -f ${CONFIG_ENERGY_MODEL} ${CUSTOM_BENCHMARK_DIR}/${BMK}
+
+                    cd ${CUSTOM_BENCHMARK_DIR}/${BMK}
+
+                    # Run benchmark
+                    sh README.GPGPU-Sim 2>&1| tee ${OUTPUT_DIR}/out_${BMK}_${replace_policy}${nsets}_${set_index_fn}.txt \
+                      || exit 1
+                fi
+            done
+
+            #################################
+            # Perform Other Benchmarks
+            #################################
+
             cd ${BENCHMARK_DIR}
             BENCHMARKS=`ls -1 -F | awk '/\//' | sed 's/\///'`;
 
@@ -51,11 +87,11 @@ for set_index_fn in F P S L; do
                     if [ ! "${BMK}" == "DG" ]; then
 
                         # Link configuration files
-                        ln -v -s -f ${CONFIG_FILE} ${BENCHMARK_DIR}/$BMK
-                        ln -v -s -f ${CONFIG_INTERCONNECT} ${BENCHMARK_DIR}/$BMK
-                        ln -v -s -f ${CONFIG_ENERGY_MODEL} ${BENCHMARK_DIR}/$BMK
+                        ln -v -s -f ${CONFIG_FILE} ${BENCHMARK_DIR}/${BMK}
+                        ln -v -s -f ${CONFIG_INTERCONNECT} ${BENCHMARK_DIR}/${BMK}
+                        ln -v -s -f ${CONFIG_ENERGY_MODEL} ${BENCHMARK_DIR}/${BMK}
 
-                        cd ${BENCHMARK_DIR}/$BMK
+                        cd ${BENCHMARK_DIR}/${BMK}
 
                         # Run benchmark
                         sh README.GPGPU-Sim 2>&1| tee ${OUTPUT_DIR}/out_${BMK}_${replace_policy}${nsets}_${set_index_fn}.txt \
