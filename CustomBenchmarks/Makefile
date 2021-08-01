@@ -12,6 +12,7 @@ noinline?=0
 .PHONY: check_environment
 default: check_environment common
 	$(SETENV) make noinline=$(noinline) -C CUSTOM1
+	$(SETENV) make noinline=$(noinline) -C CUSTOM2
 
 check_environment:
 	 @if [ ! -n "$(CUDA_INSTALL_PATH)" ]; then \
@@ -48,3 +49,4 @@ common:
 
 clean: check_environment common
 	$(SETENV) make clean -C CUSTOM1
+	$(SETENV) make clean -C CUSTOM2

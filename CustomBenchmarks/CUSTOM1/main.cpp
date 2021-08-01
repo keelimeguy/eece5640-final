@@ -25,7 +25,7 @@ int main() {
 
     std::cout << "Done." << std::endl;
 
-    // Free alocated memory
+    // Free allocated memory
     free(input);
     free(output);
 

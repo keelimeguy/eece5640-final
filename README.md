@@ -14,6 +14,10 @@
 ### Install CUDA 4:
 `cd ./gpusim && sudo make cuda`
 
+Pay attention to the output telling you how to set your environment:
+* Please make sure your PATH includes /usr/local/cuda/bin
+* Please make sure your LD_LIBRARY_PATH includes /usr/local/cuda/lib
+
 ### Compile the rest of everything:
 `cd ./gpusim && make`
 
